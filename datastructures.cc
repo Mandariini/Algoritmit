@@ -29,7 +29,8 @@ std::vector<std::tuple<Coord, WayID, Distance>> getPath(Node* start, Node* end, 
         if (next == 0) {
             if (cycleNode != 0) {
                 x.push_back({cycleNode->coord, NO_WAY, end->distance});
-                x.push_back({end->coord, end->routeTaken->wayID, end->distance});
+                auto way = std::find_if(end->neighbours.begin(), end->neighbours.end(), [&cycleNode](std::pair<Node*, Way*> &p) {return p.first == cycleNode;})->second;
+                x.push_back({end->coord, way->wayID, end->distance});
             }
             else {
                 x.push_back({end->coord, NO_WAY, end->distance});
@@ -44,43 +45,14 @@ std::vector<std::tuple<Coord, WayID, Distance>> getPath(Node* start, Node* end, 
     }
 }
 
-void relax(Node* u, Node* v) {
+void relax(Node* u, Node* v, Way* routeTaken = 0) {
     if (v->prevNode != 0) {
-        if (v->distance > u->distance + v->routeTaken->distance) {
-            v->distance = u->distance + v->routeTaken->distance;
+        if (v->distance > u->distance + routeTaken->distance) {
+            v->distance = u->distance + routeTaken->distance;
             v->prevNode = u;
+            v->routeTaken = routeTaken;
         }
     }
-}
-
-double min_est(std::shared_ptr<Node> &v, std::shared_ptr<Node> &g) {
-    double value = pow(v->coord.x - g->coord.x, 2)+pow(v->coord.y - g->coord.y, 2);
-    return value;
-}
-
-bool cycle(std::vector<std::shared_ptr<Way>> &selectedWays, std::shared_ptr<Way> begin, const std::shared_ptr<Way> next) {
-    //selectedWays.erase(std::find(selectedWays.begin(), selectedWays.end(), next));
-    auto iterStart = std::find_if(selectedWays.begin(), selectedWays.end(),
-                                  [&next](std::shared_ptr<Way> &a) {return std::find(a->coords.begin(), a->coords.end(), next->startingCoord) != a->coords.end();});
-    if (iterStart != selectedWays.end()) {
-        if (*iterStart == begin) {
-            return true;
-        }
-        return cycle(selectedWays, begin, *iterStart);
-    }
-
-    auto iterEnd = std::find_if(selectedWays.begin(), selectedWays.end(),
-                                [&next](std::shared_ptr<Way> &a) {return std::find(a->coords.begin(), a->coords.end(), next->endingCoord) != a->coords.end();});
-
-    if (iterEnd != selectedWays.end()) {
-        if (*iterEnd == begin) {
-            return true;
-        }
-        return cycle(selectedWays, begin, *iterEnd);
-    }
-
-    return false;
-
 }
 
 template <typename Type>
@@ -116,7 +88,6 @@ Datastructures::~Datastructures()
     superAreas_.clear(); // O(n)
     subAreas_.clear(); // O(n)
 
-    wayIDs_.clear();
     ways_.clear();
     nodes_.clear();
 }
@@ -139,7 +110,6 @@ void Datastructures::clear_all()
     superAreas_.clear(); // O(n)
     subAreas_.clear(); // O(n)
 
-    wayIDs_.clear();
     ways_.clear();
     nodes_.clear();
 }
@@ -513,7 +483,11 @@ AreaID Datastructures::common_area_of_subareas(AreaID id1, AreaID id2)
 
 std::vector<WayID> Datastructures::all_ways()
 {
-    return wayIDs_;
+    std::vector<WayID> wayIDs;
+    for (const auto& way: ways_) {
+        wayIDs.push_back(way.first);
+    }
+    return wayIDs;
 }
 
 bool Datastructures::add_way(WayID id, std::vector<Coord> coords)
@@ -522,7 +496,7 @@ bool Datastructures::add_way(WayID id, std::vector<Coord> coords)
         int distance = 0;
 
         std::vector<Coord>::iterator coordIt;
-        for (coordIt = coords.begin(); coordIt != coords.end(); ++coordIt) {
+        for (coordIt = coords.begin(); coordIt != coords.end(); ++coordIt) { // O(y) (amount of coords)
             if (std::next(coordIt, 1) != coords.end()) {
                 int dis = sqrt(pow((int)(coordIt->x - std::next(coordIt, 1)->x), 2) + pow((int)(coordIt->y - std::next(coordIt, 1)->y), 2));
                 distance += dis;
@@ -530,21 +504,20 @@ bool Datastructures::add_way(WayID id, std::vector<Coord> coords)
         }
 
         std::shared_ptr<Way> newWay(new Way({id, coords, coords.front(), coords.back(), distance}));
-        auto addedWayIt = ways_.insert({id, newWay}); // Theta(1), O(n)
-        wayIDs_.push_back(id);
+        ways_.insert({id, newWay}); // Theta(1), O(n)
 
-        auto firstCoordNodeOld = nodes_.find(coords.front());
-        auto secondCoordNodeOld = nodes_.find(coords.back());
+        auto firstCoordNodeOld = nodes_.find(coords.front()); // Theta(1), O(n)
+        auto secondCoordNodeOld = nodes_.find(coords.back()); // Theta(1), O(n)
         std::pair<std::unordered_map<Coord, std::shared_ptr<Node>, CoordHash>::iterator, bool> node1Iterator;
         std::pair<std::unordered_map<Coord, std::shared_ptr<Node>, CoordHash>::iterator, bool> node2Iterator;
 
         if (firstCoordNodeOld == nodes_.end()) {
             std::shared_ptr<Node> newNode1(new Node({id+"1", {}, 0, 0, coords.front(), INFINITY, white, 0, -1}));
-            node1Iterator = nodes_.insert({coords.front(), newNode1});
+            node1Iterator = nodes_.insert({coords.front(), newNode1}); // Theta(1), O(n)
         }
         if (secondCoordNodeOld == nodes_.end()) {
             std::shared_ptr<Node> newNode2(new Node({id+"2", {}, 0, 0, coords.back(), INFINITY, white, 0, -1}));
-            node2Iterator = nodes_.insert({coords.back(), newNode2});
+            node2Iterator = nodes_.insert({coords.back(), newNode2}); // Theta(1), O(n)
         }
 
         // Other one is already
@@ -559,8 +532,13 @@ bool Datastructures::add_way(WayID id, std::vector<Coord> coords)
         }
         // Both are already stored
         else if (firstCoordNodeOld != nodes_.end() && secondCoordNodeOld != nodes_.end()) {
-            firstCoordNodeOld->second->neighbours.push_back({secondCoordNodeOld->second.get(), newWay.get()});
-            secondCoordNodeOld->second->neighbours.push_back({firstCoordNodeOld->second.get(), newWay.get()});
+            if (firstCoordNodeOld == secondCoordNodeOld) {
+                return true;
+            }
+            else {
+                firstCoordNodeOld->second->neighbours.push_back({secondCoordNodeOld->second.get(), newWay.get()});
+                secondCoordNodeOld->second->neighbours.push_back({firstCoordNodeOld->second.get(), newWay.get()});
+            }
         }
         // Both are new nodes
         else if (firstCoordNodeOld == nodes_.end() && secondCoordNodeOld == nodes_.end()) {
@@ -610,7 +588,6 @@ std::vector<Coord> Datastructures::get_way_coords(WayID id)
 
 void Datastructures::clear_ways()
 {
-    wayIDs_.clear();
     ways_.clear();
     nodes_.clear();
 }
@@ -642,7 +619,8 @@ std::vector<std::tuple<Coord, WayID, Distance> > Datastructures::route_any(Coord
     startIdIt->second->distance = 0;
     queue.push_back(startIdIt->second.get());
     std::vector<std::tuple<Coord, WayID, Distance>> resultsToReverse;
-    std::shared_ptr<Node> isNull;
+
+    // BREADTH FIRST SEARCH
 
     while (queue.size() != 0) { // O(solmu)
         Node* currentNode = queue.front();
@@ -669,7 +647,6 @@ std::vector<std::tuple<Coord, WayID, Distance> > Datastructures::route_any(Coord
     routeFound:
     std::vector<std::tuple<Coord, WayID, Distance>> results;
 
-    //std::vector<std::tuple<Coord, WayID, Distance>>::iterator normalIt = resultsToReverse.begin()
     for (auto reverseIt = resultsToReverse.rbegin(); reverseIt != resultsToReverse.rend(); ++reverseIt) {
         results.push_back(*reverseIt);
     }
@@ -678,31 +655,33 @@ std::vector<std::tuple<Coord, WayID, Distance> > Datastructures::route_any(Coord
 
 bool Datastructures::remove_way(WayID id)
 {
-    auto wayIt = ways_.find(id);
+    auto wayIt = ways_.find(id); //Theta(1), O(n)
 
     if (wayIt != ways_.end()) {
-        auto startingNode = nodes_.find(wayIt->second->startingCoord);
-        auto endingNode = nodes_.find(wayIt->second->endingCoord);
+        auto startingNode = nodes_.find(wayIt->second->startingCoord); //Theta(1), O(n)
+        auto endingNode = nodes_.find(wayIt->second->endingCoord); //Theta(1), O(n)
 
+        // O(n)
         auto startNeighbourIt = std::find_if(startingNode->second->neighbours.begin(), startingNode->second->neighbours.end(), [&id](std::pair<Node*, Way*> x){return x.second->wayID == id; });
         if (startNeighbourIt != startingNode->second->neighbours.end()) {
             startingNode->second->neighbours.erase(startNeighbourIt);
         }
 
+        // O(n)
         auto endNeighbourIt = std::find_if(endingNode->second->neighbours.begin(), endingNode->second->neighbours.end(), [&id](std::pair<Node*, Way*> x){return x.second->wayID == id; });
         if (endNeighbourIt != endingNode->second->neighbours.end()) {
             endingNode->second->neighbours.erase(endNeighbourIt);
         }
 
+        // If node has no other neighbours, we delete the node.
         if (startingNode->second->neighbours.size() == 0) {
-            nodes_.erase(startingNode);
+            nodes_.erase(startingNode); // Theta(1) since one element is removed
         }
         if (endingNode->second->neighbours.size() == 0) {
-            nodes_.erase(endingNode);
+            nodes_.erase(endingNode); // Theta(1) since one element is removed
         }
 
-        ways_.erase(wayIt);
-        wayIDs_.erase(std::find(wayIDs_.begin(), wayIDs_.end(), id));
+        ways_.erase(wayIt); // Theta(1) since one element is removed
         return true;
     }
     else {
@@ -738,6 +717,8 @@ std::vector<std::tuple<Coord, WayID, Distance> > Datastructures::route_least_cro
     startIdIt->second->nodeNoInPath = 1;
     queue.push_back(startIdIt->second.get());
 
+    // BREADTH FIRST SEARCH
+
     while (queue.size() != 0) { // O(solmu)
         Node* currentNode = queue.front();
         queue.pop_front();
@@ -760,9 +741,7 @@ std::vector<std::tuple<Coord, WayID, Distance> > Datastructures::route_least_cro
         currentNode->colour = black;
     }
 
-    std::shared_ptr<Node> isNull;
     std::vector<std::tuple<Coord, WayID, Distance>> resultsToReverse = getPath(startIdIt->second.get(), endIdIt->second.get(), nullptr);
-
     std::vector<std::tuple<Coord, WayID, Distance>> results;
 
     for (auto reverseIt = resultsToReverse.rbegin(); reverseIt != resultsToReverse.rend(); ++reverseIt) {
@@ -793,10 +772,10 @@ std::vector<std::tuple<Coord, WayID> > Datastructures::route_with_cycle(Coord fr
     stack.push_back(startIdIt->second.get());
 
     std::vector<std::tuple<Coord, WayID, Distance>> resultsToReverse;
-    std::shared_ptr<Node> isNull;
+
+    // DEPTH FIRST SEARCH
 
     while (stack.size() != 0) { // O(solmu)
-        //qDebug() << "pop";
         Node* currentNode = stack.back();
         stack.pop_back();
 
@@ -816,7 +795,7 @@ std::vector<std::tuple<Coord, WayID> > Datastructures::route_with_cycle(Coord fr
                 // Route can't be backwards
                 else if (neighbour.first->colour == gray) {
                     if (currentNode->prevNode != 0 && neighbour.first->coord != currentNode->prevNode->coord) {
-                        resultsToReverse = getPath(startIdIt->second.get(), currentNode, 0, nodes_.find(neighbour.first->coord)->second.get());
+                        resultsToReverse = getPath(startIdIt->second.get(), currentNode, 0, neighbour.first);
                         goto cycleIsFound;
                     }
                 }
@@ -828,7 +807,7 @@ std::vector<std::tuple<Coord, WayID> > Datastructures::route_with_cycle(Coord fr
     }
     cycleIsFound:
 
-    std::vector<std::tuple<Coord, WayID>> results = {{NO_COORD, NO_WAY}};
+    std::vector<std::tuple<Coord, WayID>> results = {};
 
     if (resultsToReverse.size() != 0) {
         results.clear();
@@ -867,7 +846,7 @@ std::vector<std::tuple<Coord, WayID, Distance> > Datastructures::route_shortest_
     startIdIt->second->nodeNoInPath = 1;
     priorityQueue.push({0, startIdIt->second.get()});
 
-    std::shared_ptr<Node> isNull;
+    // DIJKSTRA
 
     while (priorityQueue.size() != 0) { // O(solmu)
         Node* currentNode = priorityQueue.top().second;
@@ -880,15 +859,17 @@ std::vector<std::tuple<Coord, WayID, Distance> > Datastructures::route_shortest_
         for (auto& neighbour: currentNode->neighbours) { // O(kaari)
             if (neighbour.first->colour == white) {
                 neighbour.first->colour = gray;
-                int dis = neighbour.second->distance;
-                neighbour.first->distance = dis + currentNode->distance;
-                neighbour.first->prevNode = currentNode;
-                neighbour.first->routeTaken = neighbour.second;
-                //neighbour.first->nodeNoInPath = currentNode->nodeNoInPath + 1;
+
+                if (neighbour.first->prevNode == 0) {
+                    int dis = neighbour.second->distance;
+                    neighbour.first->distance = dis + currentNode->distance;
+                    neighbour.first->prevNode = currentNode;
+                    neighbour.first->routeTaken = neighbour.second;
+                }
 
                 priorityQueue.push({neighbour.first->distance, neighbour.first});
             }
-            relax(currentNode, neighbour.first);
+            relax(currentNode, neighbour.first, neighbour.second);
         }
         currentNode->colour = black;
     }
@@ -908,27 +889,34 @@ Distance Datastructures::trim_ways()
     std::priority_queue<myWayPair, std::vector<myWayPair>, std::greater<myWayPair>> waysPriorityQueue;
     std::unordered_map<int, std::vector<Node*>> trees;
 
+    // Add all ways to priority queue with the shortest one first.
     for (auto& way: ways_) {
-        waysPriorityQueue.push({way.second->distance, way.second.get()});
+        waysPriorityQueue.push({way.second->distance, way.second.get()}); // O(log n) + O(1) (vector insert)
     }
 
+    // O(n)
     for (auto& node: nodes_) {
         node.second->colour = white;
         node.second->distance = INFINITY;
         node.second->prevNode = 0;
         node.second->routeTaken = 0;
         node.second->nodeNoInPath = 0;
-        node.second->treeId = -1;
+        node.second->treeId = -1; // Parent tree id used to check if the nodes are in the same tree
     }
 
-    while(!waysPriorityQueue.empty()) {
-        Way* way = waysPriorityQueue.top().second;
-        waysPriorityQueue.pop();
+    // In the algorithm we take the shortest distance way and add it to a tree with random id.
+    // The next ones ways we take we check if a nodes of that way is already in the same tree in which case we remove it (trim).
+    // If the nodes are in different trees, we combine those trees to one single tree and change the other halfs treeids to the first halfs.
+
+    while(!waysPriorityQueue.empty()) { // O(n)
+        Way* way = waysPriorityQueue.top().second; // O(1)
+        waysPriorityQueue.pop(); // O(log n) + O(1) (vector)
 
         auto node1 = nodes_.find(way->startingCoord)->second.get();
         auto node2 = nodes_.find(way->endingCoord)->second.get();
 
-        if (node1->colour == gray && node2->colour == gray && node1->treeId == node2->treeId && node1->treeId != -1 && node2->treeId != -1) {
+        // if the nodes are the same (end and start coord are equal) or the nodes have already been handled with so that they are in the same tree --> remove it
+        if (node1 == node2 || (node1->colour == gray && node2->colour == gray && node1->treeId == node2->treeId && node1->treeId != -1 && node2->treeId != -1)) {
             remove_way(way->wayID);
         }
         else {
@@ -938,21 +926,25 @@ Distance Datastructures::trim_ways()
             auto it1 = trees.find(node1->treeId);
             auto it2 = trees.find(node2->treeId);
 
+            // if nodes are not yet in any tree
             if (node1->treeId == -1 && node2->treeId == -1) {
                 int treeId = random_in_range(1, 999999999);
                 trees.insert({treeId, {node1, node2}});
                 node1->treeId = treeId;
                 node2->treeId = treeId;
             }
+            // if in different trees, combine them
             else if (node1->treeId != -1 && node2->treeId != -1){
                 // Insert smaller tree to bigger tree
                 if(it1->second.size()>it2->second.size()) {
+                    it1->second.reserve(it1->second.size()+it2->second.size());
                     it1->second.insert(it1->second.end(),it2->second.begin(),it2->second.end());
                     for (auto& node: it2->second) {
                         node->treeId = node1->treeId;
                     }
                     trees.erase(it2);
                 } else {
+                    it2->second.reserve(it2->second.size()+it1->second.size());
                     it2->second.insert(it2->second.end(),it1->second.begin(),it1->second.end());
                     for (auto& node: it1->second) {
                         node->treeId = node2->treeId;
@@ -960,10 +952,12 @@ Distance Datastructures::trim_ways()
                     trees.erase(it1);
                 }
             }
+            // if node1 is a new node but node2 is already in a tree.
             else if (node1->treeId == -1) {
                 it2->second.push_back(node1);
                 node1->treeId = it2->first;
             }
+            // if node2 is a new node but node1 is already in a tree
             else if (node2->treeId == -1) {
                 it1->second.push_back(node2);
                 node2->treeId = it1->first;

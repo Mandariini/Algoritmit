@@ -118,7 +118,6 @@ struct Way {
 
 struct Node {
     std::string id;
-    //std::unordered_map<Node*, Way*> neighbours; //vector/list ja id, routeTaken, käytä mielummin normi pointer
     std::vector<std::pair<Node*, Way*>> neighbours;
     Node* prevNode;
     Way* routeTaken;
@@ -162,12 +161,12 @@ public:
 
     // We recommend you implement the operations below only after implementing the ones above
 
-    // Estimate of performance: O(n log n)
-    // Short rationale for estimate: for loop is O(n) and accessing iterator value is O(log n) (?)
+    // Estimate of performance: O(n)
+    // Short rationale for estimate: for loop is O(n)
     std::vector<PlaceID> places_alphabetically();
 
-    // Estimate of performance: O(n log n)
-    // Short rationale for estimate: for loop is O(n) and accessing iterator value is O(log n) (?)
+    // Estimate of performance: O(n)
+    // Short rationale for estimate: for loop is O(n)
     std::vector<PlaceID> places_coord_order();
 
     // Estimate of performance: O(n)
@@ -230,57 +229,61 @@ public:
     // Short rationale for estimate: Find_if goes through map so O(n) and maps value to id which is O(log n) (accessing)
     bool remove_place(PlaceID id);
 
-    // Estimate of performance: O(n^2) not sure
-    // Short rationale for estimate: For loop is O(n) and std::find in for loop is O(n).
-    // Although its complexity is highest compared to other methods, its also one of the fastest. (for N=1 million, command took only 0.0880089 seconds in my test)
+    // Estimate of performance: O(log n)
+    // Short rationale for estimate: log n amount of loops * std::find log(n)
     AreaID common_area_of_subareas(AreaID id1, AreaID id2);
 
     // Phase 2 operations
 
-    // Estimate of performance:
-    // Short rationale for estimate:
+    // Estimate of performance: Theta(n)
+    // Short rationale for estimate: Loop is linear operation
     std::vector<WayID> all_ways();
 
-    // Estimate of performance:
-    // Short rationale for estimate:
+    // Estimate of performance: Theta(y), O(n + y)
+    // Short rationale for estimate: Unordered map find and insert is Theta(1) and O(n). Looping through coords is Theta(y).
     bool add_way(WayID id, std::vector<Coord> coords);
 
-    // Estimate of performance:
-    // Short rationale for estimate:
+    // Estimate of performance: O(n)
+    // Short rationale for estimate: If the node at that coord has a direct way to every other node it is O(n) where n is amount of ways.
     std::vector<std::pair<WayID, Coord>> ways_from(Coord xy);
 
-    // Estimate of performance:
-    // Short rationale for estimate:
+    // Estimate of performance: O(n)
+    // Short rationale for estimate: Because returning a vector is a linear operation and also finding from umap is Theta(1), O(n).
     std::vector<Coord> get_way_coords(WayID id);
 
-    // Estimate of performance:
-    // Short rationale for estimate:
+    // Estimate of performance: O(n)
+    // Short rationale for estimate: Clearing is a linear operation.
     void clear_ways();
 
-    // Estimate of performance:
-    // Short rationale for estimate:
+    // Estimate of performance: O(V+E) Vertex, Edge
+    // Short rationale for estimate: While loop loops at most V times and neighbour for loop loops at most E times.
+    // getPath goes through the path from start to end so its O(E). At start also O(V) to reset nodes.
     std::vector<std::tuple<Coord, WayID, Distance>> route_any(Coord fromxy, Coord toxy);
 
     // Non-compulsory operations
 
-    // Estimate of performance:
-    // Short rationale for estimate:
+    // Estimate of performance: Theta(1), O(n)
+    // Short rationale for estimate: In case given id is not found, umap find is Theta(1), O(n). If found the operation is O(n)
+    // since we loop through the neighbours of nodes determined by the starting and ending coord. In this process we delete nodes from their neighbours.
     bool remove_way(WayID id);
 
-    // Estimate of performance:
-    // Short rationale for estimate:
+    // Estimate of performance: O(V+E) Vertex, Edge
+    // Short rationale for estimate: The same as route_any but we only update node parameters if the new way is shorter in node amount than current path.
     std::vector<std::tuple<Coord, WayID, Distance>> route_least_crossroads(Coord fromxy, Coord toxy);
 
-    // Estimate of performance:
-    // Short rationale for estimate:
+    // Estimate of performance: O(V+E) Vertex, Edge
+    // Short rationale for estimate: While loop O(V) amount of Vertices. For loop O(E) since it goes through all Edges at most two times.
+    // getPath goes through the path from start to end so its O(E). At start also O(V) to reset nodes.
     std::vector<std::tuple<Coord, WayID>> route_with_cycle(Coord fromxy);
 
-    // Estimate of performance:
-    // Short rationale for estimate:
+    // Estimate of performance: O((V+E)lg V)
+    // Short rationale for estimate: I used Dijkstra-algorithm to find the shortest distance. As soon as the node we are looking from comes out of the
+    // priority queue, we can stop the loop to make it a bit faster.
     std::vector<std::tuple<Coord, WayID, Distance>> route_shortest_distance(Coord fromxy, Coord toxy);
 
-    // Estimate of performance:
-    // Short rationale for estimate:
+    // Estimate of performance: O(n*log n)
+    // Short rationale for estimate: Priority queue loops are O(n) and doind pop() is O(log n) so the total is O(n*log n).
+    // Combining two vectors is also linear as well as for loop for changing treeID.
     Distance trim_ways();
 
 private:
@@ -296,8 +299,10 @@ private:
     std::unordered_map<AreaID, AreaID> superAreas_;
     // avaimena alue, arvona alue, joka on tutkittava alueen sisällä
     std::unordered_map<AreaID, std::vector<AreaID>> subAreas_;
+
     ///----------------------------------------------------------------------
-    std::vector<WayID> wayIDs_;
+    /// PHASE2
+    ///----------------------------------------------------------------------
     std::unordered_map<WayID, std::shared_ptr<Way>> ways_;
     std::unordered_map<Coord, std::shared_ptr<Node>, CoordHash> nodes_;
 };
